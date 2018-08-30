@@ -13,6 +13,7 @@ android {
     defaultConfig {
         applicationId "org.notests.rxfeedbackexample"
         minSdkVersion 18
+        //noinspection OldTargetApi
         targetSdkVersion 27
         versionCode 1
         versionName "1.0"
@@ -45,6 +46,9 @@ dependencies {
     implementation 'com.jakewharton.rxbinding2:rxbinding-leanback-v17-kotlin:' + versions.rxbinding
 
     implementation 'com.github.NoTests.SharedSequence.kt:SharedSequence:' + versions.shared_sequence
+
+	implementation 'io.arrow-kt:arrow-optics:' + versions.arrow
+
     // rest
     implementation 'com.squareup.okhttp3:okhttp:' + versions.okhttp
     implementation 'com.squareup.moshi:moshi:' + versions.moshi

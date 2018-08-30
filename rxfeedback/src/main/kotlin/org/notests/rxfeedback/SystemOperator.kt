@@ -11,10 +11,7 @@ import org.notests.sharedsequence.empty
 /**
  * Tuple of observable sequence and corresponding scheduler context on which that observable sequence receives elements.
  */
-data class ObservableSchedulerContext<Element>(
-        val source: Observable<Element>,
-        val scheduler: Scheduler
-)
+data class ObservableSchedulerContext<Element>(val source: Observable<Element>, val scheduler: Scheduler)
 
 class Observables {
     companion object
@@ -35,25 +32,25 @@ typealias SignalFeedback<State, Event> = (Driver<State>) -> Signal<Event>
  * @return Current state of the system.
  */
 fun <State, Event> Observables.Companion.system(
-        initialState: State,
-        reduce: (State, Event) -> State,
-        scheduler: Scheduler,
-        scheduledFeedback: Iterable<Feedback<State, Event>>
+    initialState: State,
+    reduce: (State, Event) -> State,
+    scheduler: Scheduler,
+    scheduledFeedback: Iterable<Feedback<State, Event>>
 ): Observable<State> =
-        Observable.defer {
-            val replaySubject = ReplaySubject.createWithSize<State>(1)
+    Observable.defer {
+        val replaySubject = ReplaySubject.createWithSize<State>(1)
 
-            val events: Observable<Event> = Observable.merge(scheduledFeedback.map { feedback ->
-                val state = ObservableSchedulerContext(replaySubject, scheduler)
-                feedback(state)
-            })
+        val events: Observable<Event> = Observable.merge(scheduledFeedback.map { feedback ->
+            val state = ObservableSchedulerContext(replaySubject, scheduler)
+            feedback(state)
+        })
 
-            events.scan(initialState, reduce)
-                    .doOnNext { output ->
-                        replaySubject.onNext(output)
-                    }
-                    .observeOn(scheduler)
-        }!!
+        events.scan(initialState, reduce)
+            .doOnNext { output ->
+                replaySubject.onNext(output)
+            }
+            .observeOn(scheduler)
+    }!!
 
 /**
  * System simulation will be started upon subscription and stopped after subscription is disposed.
@@ -67,12 +64,12 @@ fun <State, Event> Observables.Companion.system(
  * @return Current state of the system.
  */
 fun <State, Event> Observables.Companion.system(
-        initialState: State,
-        reduce: (State, Event) -> State,
-        scheduler: Scheduler,
-        vararg scheduledFeedback: Feedback<State, Event>
+    initialState: State,
+    reduce: (State, Event) -> State,
+    scheduler: Scheduler,
+    vararg scheduledFeedback: Feedback<State, Event>
 ): Observable<State> =
-        Observables.system(initialState, reduce, scheduler, scheduledFeedback.toList())
+    Observables.system(initialState, reduce, scheduler, scheduledFeedback.toList())
 
 /**
  * System simulation will be started upon subscription and stopped after subscription is disposed.
@@ -86,16 +83,16 @@ fun <State, Event> Observables.Companion.system(
  * @return Current state of the system.
  */
 fun <State, Event> Driver.Companion.system(
-        initialState: State,
-        reduce: (State, Event) -> State,
-        feedback: Iterable<SignalFeedback<State, Event>>
+    initialState: State,
+    reduce: (State, Event) -> State,
+    feedback: Iterable<SignalFeedback<State, Event>>
 ): Driver<State> =
-        Observables.system(initialState, reduce, Driver.scheduler, feedback.map { signalFeedback ->
-            { state: ObservableSchedulerContext<State> ->
-                signalFeedback(state.source.asDriver { Driver.empty() })
-                        .asObservable()
-            }
-        }).asDriver(Driver.empty())
+    Observables.system(initialState, reduce, Driver.scheduler, feedback.map { signalFeedback ->
+        { state: ObservableSchedulerContext<State> ->
+            signalFeedback(state.source.asDriver { Driver.empty() })
+                .asObservable()
+        }
+    }).asDriver(Driver.empty())
 
 /**
  * System simulation will be started upon subscription and stopped after subscription is disposed.
@@ -109,8 +106,8 @@ fun <State, Event> Driver.Companion.system(
  * @return Current state of the system.
  */
 fun <State, Event> Driver.Companion.system(
-        initialState: State,
-        reduce: (State, Event) -> State,
-        vararg feedback: SignalFeedback<State, Event>
+    initialState: State,
+    reduce: (State, Event) -> State,
+    vararg feedback: SignalFeedback<State, Event>
 ): Driver<State> =
-        Driver.system(initialState, reduce, feedback.toList())
+    Driver.system(initialState, reduce, feedback.toList())

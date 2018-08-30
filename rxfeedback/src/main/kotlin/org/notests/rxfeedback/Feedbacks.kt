@@ -1,5 +1,8 @@
 package org.notests.rxfeedback
 
+import arrow.core.None
+import arrow.core.Option
+import arrow.core.Some
 import io.reactivex.Observable
 import io.reactivex.Scheduler
 import io.reactivex.disposables.Disposable
@@ -13,10 +16,10 @@ import org.notests.sharedsequence.empty
  * State: State type of the system.
  * Query: Subset of state used to control the feedback loop.
  *
- * When query returns [some value][Optional.Some], that value is being passed into `effects` lambda to decide which effects should be performed.
+ * When query returns [some value][Some], that value is being passed into `effects` lambda to decide which effects should be performed.
  * In case new `query` is different from the previous one, new effects are calculated by using `effects` lambda and then performed.
  *
- * When `query` returns [Optional.None], feedback loops doesn't perform any effect.
+ * When `query` returns [None], feedback loops doesn't perform any effect.
  *
  * @param query Part of state that controls feedback loop.
  * @param areEqual Part of state that controls feedback loop.
@@ -24,65 +27,65 @@ import org.notests.sharedsequence.empty
  * @return Feedback loop performing the effects.
  */
 fun <State, Query, Event> react(
-        query: (State) -> Optional<Query>,
-        areEqual: (Query, Query) -> Boolean,
-        effects: (Query) -> Observable<Event>
+    query: (State) -> Option<Query>,
+    areEqual: (Query, Query) -> Boolean,
+    effects: (Query) -> Observable<Event>
 ): (ObservableSchedulerContext<State>) -> Observable<Event> =
-        { state ->
-            state.source.map(query)
-                    .distinctUntilChanged { lhs, rhs ->
-                        when (lhs) {
-                            is Optional.Some<Query> -> {
-                                when (rhs) {
-                                    is Optional.Some<Query> -> areEqual(lhs.data, rhs.data)
-                                    is Optional.None<Query> -> false
-                                }
-                            }
-                            is Optional.None<Query> -> {
-                                when (rhs) {
-                                    is Optional.Some<Query> -> false
-                                    is Optional.None<Query> -> true
-                                }
-                            }
+    { state ->
+        state.source.map(query)
+            .distinctUntilChanged { lhs, rhs ->
+                when (lhs) {
+                    is Some -> {
+                        when (rhs) {
+                            is Some -> areEqual(lhs.t, rhs.t)
+                            None -> false
                         }
                     }
-                    .switchMap { control: Optional<Query> ->
-                        if (control !is Optional.Some<Query>) {
-                            return@switchMap Observable.empty<Event>()
+                    None -> {
+                        when (rhs) {
+                            is Some -> false
+                            None -> true
                         }
-
-                        effects(control.data)
-                                .enqueue(state.scheduler)
                     }
-        }
+                }
+            }
+            .switchMap { control: Option<Query> ->
+                if (control !is Some<Query>) {
+                    return@switchMap Observable.empty<Event>()
+                }
+                effects(control.t)
+                    .enqueue(state.scheduler)
+            }
+    }
 
 /**
  * State: State type of the system.
  * Query: Subset of state used to control the feedback loop.
  *
- * When query returns [some value][Optional.Some], that value is being passed into `effects` lambda to decide which effects should be performed.
+ * When query returns [some value][Some], that value is being passed into `effects` lambda to decide which
+ * effects should be performed.
  * In case new `query` is different from the previous one, new effects are calculated by using `effects` lambda and then performed.
  *
- * When `query` returns [Optional.None], feedback loops doesn't perform any effect.
+ * When `query` returns [None], feedback loops doesn't perform any effect.
  *
  * @param query Part of state that controls feedback loop.
  * @param effects Chooses which effects to perform for certain query result.
  * @return Feedback loop performing the effects.
  */
 fun <State, Query, Event> react(
-        query: (State) -> Optional<Query>,
-        effects: (Query) -> Observable<Event>
+    query: (State) -> Option<Query>,
+    effects: (Query) -> Observable<Event>
 ): (ObservableSchedulerContext<State>) -> Observable<Event> =
-        react(query, { lhs, rhs -> lhs == rhs }, effects)
+    react(query, { lhs, rhs -> lhs == rhs }, effects)
 
 /**
  * State: State type of the system.
  * Query: Subset of state used to control the feedback loop.
  *
- * When query returns [some value][Optional.Some], that value is being passed into `effects` lambda to decide which effects should be performed.
+ * When query returns [some value][Some], that value is being passed into `effects` lambda to decide which effects should be performed.
  * In case new `query` is different from the previous one, new effects are calculated by using `effects` lambda and then performed.
  *
- * When `query` returns [Optional.None], feedback loops doesn't perform any effect.
+ * When `query` returns [None], feedback loops doesn't perform any effect.
  *
  * @param query Part of state that controls feedback loop.
  * @param areEqual Part of state that controls feedback loop.
@@ -90,44 +93,44 @@ fun <State, Query, Event> react(
  * @return Feedback loop performing the effects.
  */
 fun <State, Query, Event> reactSafe(
-        query: (State) -> Optional<Query>,
-        areEqual: (Query, Query) -> Boolean,
-        effects: (Query) -> Signal<Event>
+    query: (State) -> Option<Query>,
+    areEqual: (Query, Query) -> Boolean,
+    effects: (Query) -> Signal<Event>
 ): (Driver<State>) -> Signal<Event> =
-        { state ->
-            val observableSchedulerContext = ObservableSchedulerContext<State>(
-                    state.asObservable(),
-                    Signal.scheduler
-            )
-            react(query, areEqual, { effects(it).asObservable() })(observableSchedulerContext)
-                    .asSignal(Signal.empty())
-        }
+    { state ->
+        val observableSchedulerContext = ObservableSchedulerContext(
+            state.asObservable(),
+            Signal.scheduler
+        )
+        react(query, areEqual) { effects(it).asObservable() }(observableSchedulerContext)
+            .asSignal(Signal.empty())
+    }
 
 /**
  * State: State type of the system.
  * Query: Subset of state used to control the feedback loop.
  *
- * When query returns [some value][Optional.Some], that value is being passed into `effects` lambda to decide which effects should be performed.
+ * When query returns [some value][Some], that value is being passed into `effects` lambda to decide which effects should be performed.
  * In case new `query` is different from the previous one, new effects are calculated by using `effects` lambda and then performed.
  *
- * When `query` returns [Optional.None], feedback loops doesn't perform any effect.
+ * When `query` returns [None], feedback loops doesn't perform any effect.
  *
  * @param query Part of state that controls feedback loop.
  * @param effects Chooses which effects to perform for certain query result.
  * @return Feedback loop performing the effects.
  */
 fun <State, Query, Event> reactSafe(
-        query: (State) -> Optional<Query>,
-        effects: (Query) -> Signal<Event>
+    query: (State) -> Option<Query>,
+    effects: (Query) -> Signal<Event>
 ): (Driver<State>) -> Signal<Event> =
-        { state ->
-            val observableSchedulerContext = ObservableSchedulerContext<State>(
-                    state.asObservable(),
-                    Signal.scheduler
-            )
-            react(query, { effects(it).asObservable() })(observableSchedulerContext)
-                    .asSignal(Signal.empty())
-        }
+    { state ->
+        val observableSchedulerContext = ObservableSchedulerContext<State>(
+            state.asObservable(),
+            Signal.scheduler
+        )
+        react(query, { effects(it).asObservable() })(observableSchedulerContext)
+            .asSignal(Signal.empty())
+    }
 
 /**
  * State: State type of the system.
@@ -144,36 +147,44 @@ fun <State, Query, Event> reactSafe(
  * @return Feedback loop performing the effects.
  */
 fun <State, Query, Event> reactSet(
-        query: (State) -> Set<Query>,
-        effects: (Query) -> Observable<Event>
+    query: (State) -> Set<Query>,
+    effects: (Query) -> Observable<Event>
 ): (ObservableSchedulerContext<State>) -> Observable<Event> =
-        { state ->
-            val query = state.source.map(query)
-                    .replay(1)
-                    .refCount()
+    { state ->
+        val sharedQuery = state.source.map(query)
+            .replay(1)
+            .refCount()
 
-            val newQueries = Observable.zip(query, query.startWith(setOf<Query>()), BiFunction { current: Set<Query>, previous: Set<Query> -> current - previous })
-            val asyncScheduler = state.scheduler
-            newQueries.flatMap { controls: Set<Query> ->
-                Observable.merge(controls.map { control ->
-                    effects(control)
-                            .enqueue(state.scheduler)
-                            .takeUntilWithCompletedAsync(query.filter { !it.contains(control) }, state.scheduler)
-                })
-            }
+        val newQueries = Observable.zip(
+            sharedQuery,
+            sharedQuery.startWith(setOf<Query>()),
+            BiFunction { current: Set<Query>, previous: Set<Query> -> current - previous })
+
+        val asyncScheduler = state.scheduler
+
+        newQueries.flatMap { controls: Set<Query> ->
+            Observable.merge(controls.map { control ->
+                effects(control)
+                    .enqueue(asyncScheduler)
+                    .takeUntilWithCompletedAsync(sharedQuery.filter { !it.contains(control) }, asyncScheduler)
+            })
         }
+    }
 
 // This is important to avoid reentrancy issues. Completed event is only used for cleanup
-fun <Element, O> Observable<Element>.takeUntilWithCompletedAsync(other: Observable<O>, scheduler: Scheduler): Observable<Element> {
+fun <Element, O> Observable<Element>.takeUntilWithCompletedAsync(
+    other: Observable<O>,
+    scheduler: Scheduler
+): Observable<Element> {
     // this little piggy will delay completed event
     val completeAsSoonAsPossible = Observable.empty<Element>().observeOn(scheduler)
     return other
-            .take(1)
-            .map { _ -> completeAsSoonAsPossible }
-            // this little piggy will ensure self is being run first
-            .startWith(this)
-            // this little piggy will ensure that new events are being blocked immediatelly
-            .switchMap { it }
+        .take(1)
+        .map { _ -> completeAsSoonAsPossible }
+        // this little piggy will ensure self is being run first
+        .startWith(this)
+        // this little piggy will ensure that new events are being blocked immediatelly
+        .switchMap { it }
 }
 
 /**
@@ -191,27 +202,25 @@ fun <Element, O> Observable<Element>.takeUntilWithCompletedAsync(other: Observab
  * @return Feedback loop performing the effects.
  */
 fun <State, Query, Event> reactSetSafe(
-        query: (State) -> Set<Query>,
-        effects: (Query) -> Signal<Event>
+    query: (State) -> Set<Query>,
+    effects: (Query) -> Signal<Event>
 ): (Driver<State>) -> Signal<Event> =
-        { state ->
-            val observableSchedulerContext = ObservableSchedulerContext<State>(
-                    state.asObservable(),
-                    Signal.scheduler
-            )
-            reactSet(query, { effects(it).asObservable() })(observableSchedulerContext)
-                    .asSignal(Signal.empty())
-        }
-
+    { state ->
+        val observableSchedulerContext = ObservableSchedulerContext(
+            state.asObservable(),
+            Signal.scheduler
+        )
+        reactSet(query) { effects(it).asObservable() }(observableSchedulerContext)
+            .asSignal(Signal.empty())
+    }
 
 fun <Element> Observable<Element>.enqueue(scheduler: Scheduler): Observable<Element> =
-        this
-                // observe on is here because results should be cancelable
-                .observeOn(scheduler)
-                // subscribe on is here because side-effects also need to be cancelable
-                // (smooths out any glitches caused by start-cancel immediatelly)
-                .subscribeOn(scheduler)
-
+    this
+        // observe on is here because results should be cancelable
+        .observeOn(scheduler)
+        // subscribe on is here because side-effects also need to be cancelable
+        // (smooths out any glitches caused by start-cancel immediately)
+        .subscribeOn(scheduler)
 
 /**
  * Contains subscriptions and events.
@@ -219,11 +228,12 @@ fun <Element> Observable<Element>.enqueue(scheduler: Scheduler): Observable<Elem
  * @param subscriptions map a system state to UI presentation.
  * @param events map events from UI to events of a given system.
  */
-data class Bindings<Event>(val subscriptions: Iterable<Disposable>, val events: Iterable<Observable<Event>>) : Disposable {
+data class Bindings<Event>(val subscriptions: Iterable<Disposable>, val events: Iterable<Observable<Event>>) :
+    Disposable {
 
     companion object {
         fun <Event> safe(subscriptions: Iterable<Disposable>, events: Iterable<Signal<Event>>): Bindings<Event> =
-                Bindings(subscriptions, events.map { it.asObservable() })
+            Bindings(subscriptions, events.map { it.asObservable() })
     }
 
     override fun dispose() {
@@ -238,29 +248,28 @@ data class Bindings<Event>(val subscriptions: Iterable<Disposable>, val events: 
 }
 
 /**
-Bi-directional binding of a system State to external state machine and events from it.
+ * Bi-directional binding of a system State to external state machine and events from it.
  */
 fun <State, Event> bind(bindings: (ObservableSchedulerContext<State>) -> (Bindings<Event>)): (ObservableSchedulerContext<State>) -> Observable<Event> =
-        { state: ObservableSchedulerContext<State> ->
-            Observable.using({
-                bindings(state)
-            }, { bindings: Bindings<Event> ->
-                Observable.merge(bindings.events)
-                        .enqueue(state.scheduler)
-            }, { it.dispose() })
-        }
+    { state: ObservableSchedulerContext<State> ->
+        Observable.using({
+            bindings(state)
+        }, { bindings: Bindings<Event> ->
+            Observable.merge(bindings.events)
+                .enqueue(state.scheduler)
+        }, { it.dispose() })
+    }
 
 /**
-Bi-directional binding of a system State to external state machine and events from it.
+ * Bi-directional binding of a system State to external state machine and events from it.
  */
 fun <State, Event> bindSafe(bindings: (Driver<State>) -> (Bindings<Event>)): (Driver<State>) -> Signal<Event> =
-        { state: Driver<State> ->
-            Observable.using({
-                bindings(state)
-            }, { bindings: Bindings<Event> ->
-                Observable.merge(bindings.events)
-            }, { it.dispose() })
-                    .enqueue(Signal.scheduler)
-                    .asSignal(Signal.empty<Event>())
-        }
-
+    { state: Driver<State> ->
+        Observable.using({
+            bindings(state)
+        }, { bindings: Bindings<Event> ->
+            Observable.merge(bindings.events)
+        }, { it.dispose() })
+            .enqueue(Signal.scheduler)
+            .asSignal(Signal.empty<Event>())
+    }

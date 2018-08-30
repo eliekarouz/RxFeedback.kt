@@ -1,28 +1,29 @@
 package org.notests.rxfeedback
 
+import arrow.core.None
+import arrow.core.Option
+import arrow.core.Some
+
 /**
  * Created by juraj on 13/11/2017.
  */
 
-var String.needsToAppendDot: Optional<Unit>
+var String.needsToAppendDot: Option<Unit>
     get() =
         if (this == "initial" || this == "initial_." || this == "initial_._.") {
-            Optional.Some(Unit)
-        } else Optional.None()
-    set(value) {}
+            Some(Unit)
+        } else None
+    set(_) {}
 
-var String.needsToAppend: Optional<String>
+var String.needsToAppend: Option<String>
     get() =
-        if (this == "initial") {
-            Optional.Some("_a")
-        } else if (this == "initial_a") {
-            Optional.Some("_b")
-        } else if (this == "initial_a_b") {
-            Optional.Some("_c")
-        } else {
-            Optional.None<String>()
+        when {
+            this == "initial" -> Some("_a")
+            this == "initial_a" -> Some("_b")
+            this == "initial_a_b" -> Some("_c")
+            else -> None
         }
-    set(value) {}
+    set(_) {}
 
 var String.needsToAppendParallel: Set<String>
     get() =
@@ -38,4 +39,4 @@ var String.needsToAppendParallel: Set<String>
             }
             result
         }
-    set(value) {}
+    set(_) {}

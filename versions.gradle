@@ -13,6 +13,7 @@ versions.rx_kotlin = '2.3.0'
 versions.kotlin = '1.2.51'
 versions.shared_sequence = '0.1.13'
 versions.junit = '4.12'
+versions.arrow = '0.7.3'
 
 // app dependencies
 versions.support = '27.1.1'

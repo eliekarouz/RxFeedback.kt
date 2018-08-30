@@ -5,13 +5,15 @@ import android.support.annotation.MainThread
 import android.support.v7.app.AppCompatActivity
 import android.support.v7.widget.LinearLayoutManager
 import android.support.v7.widget.RecyclerView
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.RelativeLayout
 import android.widget.TextView
 import android.widget.Toast
+import arrow.core.None
+import arrow.core.Option
+import arrow.core.Some
 import com.jakewharton.rxbinding2.support.v7.widget.RxSearchView
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -24,14 +26,27 @@ import io.reactivex.functions.Function
 import io.reactivex.schedulers.Schedulers
 import io.reactivex.subjects.PublishSubject
 import kotlinx.android.synthetic.main.activity_github_paginated_search.*
-import okhttp3.*
-import org.notests.rxfeedback.*
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import org.notests.rxfeedback.Bindings
+import org.notests.rxfeedback.bindSafe
+import org.notests.rxfeedback.reactSafe
+import org.notests.rxfeedback.system
 import org.notests.rxfeedbackexample.R
 import org.notests.rxfeedbackexample.github.paginated.search.RepositoryRecyclerViewAdapter.ViewHolder
-import org.notests.sharedsequence.*
+import org.notests.sharedsequence.Driver
+import org.notests.sharedsequence.Signal
+import org.notests.sharedsequence.asSignal
+import org.notests.sharedsequence.drive
+import org.notests.sharedsequence.empty
+import org.notests.sharedsequence.just
+import org.notests.sharedsequence.map
+import org.notests.sharedsequence.switchMapSignal
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-
 
 /**
  * Created by Juraj Begovac on 03/12/2017.
@@ -40,11 +55,12 @@ import java.util.concurrent.TimeUnit
 data class Repository(val name: String, val url: String)
 
 data class State(
-        var search: String,
-        var nextPageUrl: Optional<String>,
-        var shouldLoadNextPage: Boolean,
-        var results: List<Repository>,
-        var lastError: Optional<GitHubServiceError>) {
+    var search: String,
+    var nextPageUrl: Option<String>,
+    var shouldLoadNextPage: Boolean,
+    var results: List<Repository>,
+    var lastError: Option<GitHubServiceError>
+) {
     companion object {}
 }
 
@@ -54,50 +70,56 @@ sealed class Event {
     object StartLoadingNextPage : Event()
 }
 
-
 val State.Companion.empty: State
-    get() = State(search = "", nextPageUrl = Optional.None(), shouldLoadNextPage = false, results = emptyList(), lastError = Optional.None())
+    get() = State(search = "", nextPageUrl = None, shouldLoadNextPage = false, results = emptyList(), lastError = None)
 
 // transitions
 fun State.Companion.reduce(state: State, event: Event): State =
-        when (event) {
-            is Event.SearchChanged -> {
-                if (event.search.isEmpty()) {
-                    state.copy(search = event.search,
-                            nextPageUrl = Optional.None(),
-                            shouldLoadNextPage = false,
-                            results = emptyList(),
-                            lastError = Optional.None())
-                } else {
-                    state.copy(search = event.search,
-                            nextPageUrl = Optional.Some("https://api.github.com/search/repositories?q=${event.search}"),
-                            results = emptyList(),
-                            shouldLoadNextPage = true,
-                            lastError = Optional.None())
-                }
+    when (event) {
+        is Event.SearchChanged -> {
+            if (event.search.isEmpty()) {
+                state.copy(
+                    search = event.search,
+                    nextPageUrl = None,
+                    shouldLoadNextPage = false,
+                    results = emptyList(),
+                    lastError = None
+                )
+            } else {
+                state.copy(
+                    search = event.search,
+                    nextPageUrl = Some("https://api.github.com/search/repositories?q=${event.search}"),
+                    results = emptyList(),
+                    shouldLoadNextPage = true,
+                    lastError = None
+                )
             }
-
-            Event.StartLoadingNextPage -> state.copy(shouldLoadNextPage = true)
-
-            is Event.Response ->
-                when (event.response) {
-                    is Result.Success ->
-                        state.copy(results = state.results.plus(event.response.value.first),
-                                shouldLoadNextPage = false,
-                                nextPageUrl = event.response.value.second,
-                                lastError = Optional.None())
-                    is Result.Failure ->
-                        state.copy(shouldLoadNextPage = false,
-                                lastError = Optional.Some(event.response.error))
-                }
         }
 
-// queries
-var State.loadNextPage: Optional<String>
-    get() =
-        if (this.shouldLoadNextPage) this.nextPageUrl else Optional.None()
-    set(value) {}
+        Event.StartLoadingNextPage -> state.copy(shouldLoadNextPage = true)
 
+        is Event.Response ->
+            when (event.response) {
+                is Result.Success ->
+                    state.copy(
+                        results = state.results.plus(event.response.value.first),
+                        shouldLoadNextPage = false,
+                        nextPageUrl = event.response.value.second,
+                        lastError = None
+                    )
+                is Result.Failure ->
+                    state.copy(
+                        shouldLoadNextPage = false,
+                        lastError = Some(event.response.error)
+                    )
+            }
+    }
+
+// queries
+var State.loadNextPage: Option<String>
+    get() =
+        if (this.shouldLoadNextPage) this.nextPageUrl else None
+    set(_) {}
 
 class GithubPaginatedSearchActivity : AppCompatActivity() {
 
@@ -122,52 +144,56 @@ class GithubPaginatedSearchActivity : AppCompatActivity() {
         }
 
         // RxFeedback
-        val triggerLoadNextPage: (Driver<State>) -> Signal<Event> = {
-            it.switchMapSignal<State, Event> {
-                if (it.shouldLoadNextPage) {
+        val triggerLoadNextPage: (Driver<State>) -> Signal<Event> = { driver ->
+            driver.switchMapSignal<State, Event> { state ->
+                if (state.shouldLoadNextPage) {
                     return@switchMapSignal Signal.empty<Event>()
                 }
 
                 return@switchMapSignal recyclerview
-                        .nearBottom()
-                        .map { Event.StartLoadingNextPage }
+                    .nearBottom()
+                    .map { Event.StartLoadingNextPage }
             }
         }
 
         val searchEvent: Signal<Event> = RxSearchView
-                .queryTextChanges(searchView)
-                .debounce(500, TimeUnit.MILLISECONDS)
-                .distinctUntilChanged()
-                .asSignal(onError = Signal.empty())
-                .map { Event.SearchChanged(it.toString()) }
+            .queryTextChanges(searchView)
+            .debounce(500, TimeUnit.MILLISECONDS)
+            .distinctUntilChanged()
+            .asSignal(onError = Signal.empty())
+            .map { Event.SearchChanged(it.toString()) }
 
         // UI, user feedback
-        val bindUI: (Driver<State>) -> Signal<Event> = bindSafe {
+        val bindUI: (Driver<State>) -> Signal<Event> = bindSafe { driver ->
             val subscriptions = listOf(
-                    it.map { it.lastError }.drive { showOrHideError(it) },
-                    it.map { it.results }.drive { recyclerview.bindItems(it) },
-                    it.map { it.loadNextPage }.drive { showQuery(it) }
+                driver.map { it.lastError }.drive { showOrHideError(it) },
+                driver.map { it.results }.drive { recyclerview.bindItems(it) },
+                driver.map { it.loadNextPage }.drive { showQuery(it) }
             )
-            val events = listOf(searchEvent, triggerLoadNextPage(it))
+            val events = listOf(searchEvent, triggerLoadNextPage(driver))
             return@bindSafe Bindings.safe(subscriptions, events)
         }
 
         // NoUI, automatic feedback
+        @Suppress("UNCHECKED_CAST")
         val bindAutomatic = reactSafe<State, String, Event>(
-                query = { it.loadNextPage },
-                effects = {
-                    repositoryService.getSearchRepositoriesResponse(it)
-                            .asSignal(onError = Signal.just(Result.Failure(GitHubServiceError.Offline) as SearchRepositoriesResponse))
-                            .map { Event.Response(it) }
-                }
+            query = { it.loadNextPage },
+            effects = { nextPageUrl ->
+                repositoryService.getSearchRepositoriesResponse(nextPageUrl)
+                    .asSignal(onError = Signal.just(Result.Failure(GitHubServiceError.Offline) as SearchRepositoriesResponse))
+                    .map { Event.Response(it) }
+            }
         )
 
         disposable = Driver.system(
-                initialState = State.empty,
-                reduce = { state: State, event: Event -> State.reduce(state, event) },
-                feedback = listOf(bindUI,
-                        bindAutomatic))
-                .drive()
+            initialState = State.empty,
+            reduce = { state: State, event: Event -> State.reduce(state, event) },
+            feedback = listOf(
+                bindUI,
+                bindAutomatic
+            )
+        )
+            .drive()
     }
 
     override fun onDestroy() {
@@ -187,7 +213,7 @@ sealed class GitHubServiceError : Error() {
 }
 
 var GitHubServiceError.displayMessage: String
-    set(value) {}
+    set(_) {}
     get() {
         return when (this) {
             GitHubServiceError.Offline -> "Ups, no network connectivity"
@@ -195,8 +221,7 @@ var GitHubServiceError.displayMessage: String
         }
     }
 
-private typealias SearchRepositoriesResponse = Result<Pair<List<Repository>, Optional<String>>, GitHubServiceError>
-
+private typealias SearchRepositoriesResponse = Result<Pair<List<Repository>, Option<String>>, GitHubServiceError>
 
 // TODO this is not working for now
 private fun RepositoryService.loadRepositories(resource: String): Observable<SearchRepositoriesResponse> {
@@ -204,23 +229,23 @@ private fun RepositoryService.loadRepositories(resource: String): Observable<Sea
     val maxAttempts = 4
 
     return this.getSearchRepositoriesResponse(resource)
-            .retry(3)
-            .retryWhen { errorTrigger ->
-                return@retryWhen errorTrigger
-                        .mapWithIndex(Function<Throwable, Throwable> { it })
-                        .flatMap<Int> { indexErrorPair ->
-                            val attempt = indexErrorPair.first
-                            val error = indexErrorPair.second
+        .retry(3)
+        .retryWhen { errorTrigger ->
+            return@retryWhen errorTrigger
+                .mapWithIndex(Function<Throwable, Throwable> { it })
+                .flatMap<Int> { indexErrorPair ->
+                    val attempt = indexErrorPair.first
+                    val error = indexErrorPair.second
 
-                            if (attempt >= maxAttempts - 1) {
-                                return@flatMap Observable.error<Int>(error)
-                            }
+                    if (attempt >= maxAttempts - 1) {
+                        return@flatMap Observable.error<Int>(error)
+                    }
 
-                            return@flatMap Observable.timer((attempt + 1).toLong(), TimeUnit.SECONDS)
-                                    .take(1L)
-                                    .map { it.toInt() }
-                        }
-            }
+                    return@flatMap Observable.timer((attempt + 1).toLong(), TimeUnit.SECONDS)
+                        .take(1L)
+                        .map { it.toInt() }
+                }
+        }
 }
 
 // REST API
@@ -228,15 +253,15 @@ class RepositoryService {
 
     private val client = OkHttpClient()
     private val moshi = Moshi.Builder()
-            .add(KotlinJsonAdapterFactory())
-            .build()!!
+        .add(KotlinJsonAdapterFactory())
+        .build()!!
 
     fun getSearchRepositoriesResponse(url: String): Observable<SearchRepositoriesResponse> {
         return Observable.create { e: ObservableEmitter<SearchRepositoriesResponse> ->
 
             val request = Request.Builder()
-                    .url(url)
-                    .build()
+                .url(url)
+                .build()
 
             val call = client.newCall(request)
 
@@ -252,6 +277,7 @@ class RepositoryService {
                         e.onError(error)
                 }
 
+                @Suppress("UNCHECKED_CAST")
                 override fun onResponse(call: Call?, response: Response) {
                     if (response.code() == 403) {
                         e.onNext(Result.Failure(GitHubServiceError.GithubLimitReached) as SearchRepositoriesResponse)
@@ -268,42 +294,43 @@ class RepositoryService {
                     val repositories = parseRepositories(response.body()!!.string())
                     val nextUrl = parseNextUrl(response)
 
-                    e.onNext(Result.Success(Pair(repositories, nextUrl)) as SearchRepositoriesResponse)
+                    e.onNext(
+                        Result.Success(Pair(repositories, nextUrl)) as SearchRepositoriesResponse
+                    )
                     e.onComplete()
                 }
-
             })
         }
-                .subscribeOn(Schedulers.io())
-                .observeOn(Schedulers.computation())
+            .subscribeOn(Schedulers.io())
+            .observeOn(Schedulers.computation())
     }
 
-    private fun parseNextUrl(response: Response): Optional<String> {
-        val linkHeader = response.headers().get("Link") ?: return Optional.None()
+    private fun parseNextUrl(response: Response): Option<String> {
+        val linkHeader = response.headers().get("Link") ?: return None
         val links =
-                try {
-                    parseLinks(linkHeader)
-                } catch (e: IllegalStateException) {
-                    emptyMap<String, String>()
-                }
+            try {
+                parseLinks(linkHeader)
+            } catch (e: IllegalStateException) {
+                emptyMap<String, String>()
+            }
 
-        val nextLink = links["next"] ?: return Optional.None()
-        return Optional.Some(nextLink)
+        val nextLink = links["next"] ?: return None
+        return Some(nextLink)
     }
 
     private fun parseRepositories(json: String): List<Repository> {
         return moshi
-                .adapter(GithubRepositoryResponse::class.java)
-                .fromJson(json)!!
-                .items
-                .map { Repository(it.name, it.url) }
+            .adapter(GithubRepositoryResponse::class.java)
+            .fromJson(json)!!
+            .items
+            .map { Repository(it.name, it.url) }
     }
 }
 
 data class GithubRepositoryResponse(val items: List<ItemResponse>)
 data class ItemResponse(val name: String, val url: String)
 
-val parseLinksPattern = "\\s*,?\\s*<([^\\>]*)>\\s*;\\s*rel=\"([^\"]*)\""
+const val parseLinksPattern = "\\s*,?\\s*<([^>]*)>\\s*;\\s*rel=\"([^\"]*)\""
 val linkRegex = parseLinksPattern.toRegex()
 
 @Throws(IllegalStateException::class)
@@ -317,29 +344,31 @@ fun parseLinks(links: String): Map<String, String> {
     return result
 }
 
-private fun GithubPaginatedSearchActivity.showOrHideError(error: Optional<GitHubServiceError>) {
-    if (error is Optional.Some) {
-        Toast.makeText(this, error.data.displayMessage, Toast.LENGTH_SHORT).show()
+private fun GithubPaginatedSearchActivity.showOrHideError(error: Option<GitHubServiceError>) {
+    if (error is Some) {
+        Toast.makeText(this, error.t.displayMessage, Toast.LENGTH_SHORT).show()
     }
 }
 
-private fun GithubPaginatedSearchActivity.showQuery(text: Optional<String>) =
-        if (text is Optional.Some) {
-            Toast.makeText(this, "Query: ${text.data}", Toast.LENGTH_SHORT).show()
-        } else {
-            // do nothing
-        }
+private fun GithubPaginatedSearchActivity.showQuery(text: Option<String>) =
+    if (text is Some) {
+        Toast.makeText(this, "Query: ${text.t}", Toast.LENGTH_SHORT).show()
+    } else {
+        // do nothing
+    }
 
 private fun RecyclerView.bindItems(items: List<Repository>) =
-        (this.adapter as RepositoryRecyclerViewAdapter).setItems(items)
+    (this.adapter as RepositoryRecyclerViewAdapter).setItems(items)
 
 private fun RecyclerView.nearBottom(): Signal<Unit> =
-        (this.adapter as RepositoryRecyclerViewAdapter)
-                .bindToListNearBottom()
-                .asSignal { Signal.empty() }
+    (this.adapter as RepositoryRecyclerViewAdapter)
+        .bindToListNearBottom()
+        .asSignal { Signal.empty() }
 
-
-private class RepositoryRecyclerViewAdapter(private var items: List<Repository>, private val onClick: (Repository) -> (Unit)) : RecyclerView.Adapter<ViewHolder>() {
+private class RepositoryRecyclerViewAdapter(
+    private var items: List<Repository>,
+    private val onClick: (Repository) -> (Unit)
+) : RecyclerView.Adapter<ViewHolder>() {
 
     private val listReachedBottom: PublishSubject<Unit> = PublishSubject.create()
 
@@ -377,6 +406,6 @@ private class RepositoryRecyclerViewAdapter(private var items: List<Repository>,
 }
 
 private fun <T, R> Observable<T>.mapWithIndex(mapper: io.reactivex.functions.Function<in T, out R>): Observable<Pair<Int, R>> =
-        this
-                .map { mapper.apply(it) }
-                .zipWith(Observable.range(0, Int.MAX_VALUE), BiFunction { p0, p1 -> Pair(p1, p0) })
+    this
+        .map { mapper.apply(it) }
+        .zipWith(Observable.range(0, Int.MAX_VALUE), BiFunction { p0, p1 -> Pair(p1, p0) })

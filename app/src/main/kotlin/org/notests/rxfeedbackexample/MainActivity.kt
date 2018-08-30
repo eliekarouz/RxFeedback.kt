@@ -16,7 +16,6 @@ import org.notests.rxfeedbackexample.counter.Counter
 import org.notests.rxfeedbackexample.github.paginated.search.GithubPaginatedSearchActivity
 import org.notests.rxfeedbackexample.play.catch.PlayCatch
 
-
 class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,13 +26,18 @@ class MainActivity : AppCompatActivity() {
 
         recyclerview.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = MyListAdapter(Item.values().toList(), {
+            adapter = MyListAdapter(Item.values().toList()) {
                 when (it) {
                     Item.Counter -> startActivity(Intent(this@MainActivity, Counter::class.java))
                     Item.PlayCatch -> startActivity(Intent(this@MainActivity, PlayCatch::class.java))
-                    Item.GithubPaginatedSearch -> startActivity(Intent(this@MainActivity, GithubPaginatedSearchActivity::class.java))
+                    Item.GithubPaginatedSearch -> startActivity(
+                        Intent(
+                            this@MainActivity,
+                            GithubPaginatedSearchActivity::class.java
+                        )
+                    )
                 }
-            })
+            }
         }
     }
 }
@@ -44,7 +48,8 @@ enum class Item(val displayName: String) {
     GithubPaginatedSearch("Github pagination")
 }
 
-class MyListAdapter(private val items: List<Item>, private val onClick: (Item) -> (Unit)) : RecyclerView.Adapter<ViewHolder>() {
+class MyListAdapter(private val items: List<Item>, private val onClick: (Item) -> (Unit)) :
+    RecyclerView.Adapter<ViewHolder>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_main, parent, false)

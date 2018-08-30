@@ -33,26 +33,28 @@ class Counter : AppCompatActivity() {
 
         supportActionBar?.title = "Counter"
 
-        disposable = Observables.system(initialState = 0,
-                reduce = { state, event: Event ->
-                    when (event) {
-                        Event.Increment -> state + 1
-                        Event.Decrement -> state - 1
-                    }
-                },
-                scheduler = AndroidSchedulers.mainThread(),
-                scheduledFeedback = listOf(
-                        bind {
-                            val subscriptions = listOf(
-                                    it.source.map { it.toString() }.subscribe { label.text = it }
-                            )
-                            val events = listOf(
-                                    RxView.clicks(plus).map { Event.Increment },
-                                    RxView.clicks(minus).map { Event.Decrement }
-                            )
-                            return@bind Bindings(subscriptions, events)
-                        }))
-                .subscribe()
+        disposable = Observables.system(
+            initialState = 0,
+            reduce = { state, event: Event ->
+                when (event) {
+                    Event.Increment -> state + 1
+                    Event.Decrement -> state - 1
+                }
+            },
+            scheduler = AndroidSchedulers.mainThread(),
+            scheduledFeedback = listOf(
+                bind { observableSchedulerContext ->
+                    val subscriptions = listOf(
+                        observableSchedulerContext.source.map { it.toString() }.subscribe { label.text = it }
+                    )
+                    val events = listOf(
+                        RxView.clicks(plus).map { Event.Increment },
+                        RxView.clicks(minus).map { Event.Decrement }
+                    )
+                    return@bind Bindings(subscriptions, events)
+                })
+        )
+            .subscribe()
     }
 
     override fun onDestroy() {

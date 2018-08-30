@@ -3,6 +3,9 @@ package org.notests.rxfeedbackexample.play.catch
 import android.os.Bundle
 import android.support.v7.app.AppCompatActivity
 import android.view.View
+import arrow.core.None
+import arrow.core.Option
+import arrow.core.Some
 import com.jakewharton.rxbinding2.view.RxView
 import io.reactivex.Observable
 import io.reactivex.android.schedulers.AndroidSchedulers
@@ -36,11 +39,11 @@ class PlayCatch : AppCompatActivity() {
         supportActionBar?.title = "Play Catch"
 
         // UI is human feedback
-        val bindUI = bind<State, Event> {
+        val bindUI = bind<State, Event> { observableSchedulerContext ->
             val subscriptions = listOf<Disposable>(
-                    it.source.map { it.myStateOfMind }.subscribe { my_label.text = it },
-                    it.source.map { it.machineStateOfMind }.subscribe { machines_label.text = it },
-                    it.source.map { !it.doIHaveTheBall }.subscribe { throw_the_ball_button.isHidden = it }
+                    observableSchedulerContext.source.map { it.myStateOfMind }.subscribe { my_label.text = it },
+                    observableSchedulerContext.source.map { it.machineStateOfMind }.subscribe { machines_label.text = it },
+                    observableSchedulerContext.source.map { !it.doIHaveTheBall }.subscribe { throw_the_ball_button.isHidden = it }
             )
             val events = listOf<Observable<Event>>(
                     RxView.clicks(throw_the_ball_button).map { Event.ThrowToMachine }
@@ -53,7 +56,7 @@ class PlayCatch : AppCompatActivity() {
                 query = {
                     it.machinePitching
                 },
-                effects = {
+                effects = { _ ->
                     Observable.timer(1, TimeUnit.SECONDS, AndroidSchedulers.mainThread())
                             .map { Event.ThrowToHuman }
                 })
@@ -99,8 +102,8 @@ val State.machineStateOfMind: String
         State.MachineHasIt -> "I have the 🏈"
     }
 
-val State.machinePitching: Optional<Unit>
-    get() = if (this == State.MachineHasIt) Optional.Some(Unit) else Optional.None()
+val State.machinePitching: Option<Unit>
+    get() = if (this == State.MachineHasIt) Some(Unit) else None
 
 var View.isHidden: Boolean
     set(value) {
